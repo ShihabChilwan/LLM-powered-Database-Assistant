@@ -1,5 +1,6 @@
 import pdfplumber
 
+
 def parse_purchase_order(path):
     with pdfplumber.open(path) as pdf:
         page0 = pdf.pages[0]
@@ -14,7 +15,10 @@ def parse_purchase_order(path):
 
         # --- Region 2: Product table, possibly spanning multiple pages ---
         product_table_page0 = page0_tables[1]
-        col_names = [c.rstrip(":").strip().lower().replace(" ", "_") for c in product_table_page0[0]]
+        col_names = [
+            c.rstrip(":").strip().lower().replace(" ", "_")
+            for c in product_table_page0[0]
+        ]
 
         product_rows = product_table_page0[1:]
         for page in pdf.pages[1:]:
@@ -31,7 +35,11 @@ def parse_purchase_order(path):
         header["line_items"] = line_items
         return header
 
-if __name__=="__main__":
-    result = parse_purchase_order("CompanyDocuments/PurchaseOrders/purchase_orders_11077.pdf")
+
+if __name__ == "__main__":
+    result = parse_purchase_order(
+        "CompanyDocuments/PurchaseOrders/purchase_orders_11077.pdf"
+    )
     import json
-    print(json.dumps(result,indent=2))
+
+    print(json.dumps(result, indent=2))
