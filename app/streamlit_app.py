@@ -2,7 +2,7 @@
 Database QA and Report Assistant - Streamlit UI
 
 Two features, wired to your existing modules:
-  1. Ask a question -> routed through the text-to-SQL loop (dbcrawler.py),
+  1. Ask a question -> routed through the text-to-SQL loop (app/llm/text_to_sql.py),
      with every tool call (generated SQL + results) shown transparently.
   2. Generate an Order Report -> reuses dbjson.py + order_report.py to
      produce a downloadable .xlsx for a given order_id.
@@ -28,11 +28,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app import config
 from app.llm.text_to_sql import answer_question_manual_loop
 from reporting.dbjson import get_order_report_data
 from reporting.order_report import generate_order_report
 
-DB_PATH = Path(__file__).resolve().parent / "database" / "processed.db"
+DB_PATH = config.DB_PATH
 
 st.set_page_config(page_title=" Database QA and Report Assistant", layout="wide")
 
@@ -41,8 +42,16 @@ st.set_page_config(page_title=" Database QA and Report Assistant", layout="wide"
 
 
 @st.cache_resource
-def get_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def get_connection() -> sqlite3.Connection:
+    """Opens one shared, read-only connection to the database.
+
+    The UI only reads, so mode=ro makes any accidental write fail instead of
+    changing the data. @st.cache_resource makes Streamlit create it once and
+    reuse it on every rerun (a decorator wraps the function, like an annotation
+    that adds behaviour). check_same_thread=False is needed because Streamlit
+    may call it from different threads.
+    """
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -91,7 +100,9 @@ with tab_ask:
     if ask_clicked:
         with st.spinner("Thinking..."):
             start = time.time()
-            answer, steps, model_calls = answer_question_manual_loop(question, verbose=False)
+            answer, steps, model_calls = answer_question_manual_loop(
+                question, verbose=False
+            )
             elapsed = time.time() - start
 
         total_tokens = sum(call["tokens"]["total"] for call in model_calls)
@@ -108,8 +119,14 @@ with tab_ask:
                     st.code(step["sql"], language="sql")
                     if step["error"]:
                         st.error(step["error"])
-                    else:
-                        st.dataframe(step["result"], use_container_width=True)
+                        continue
+                    result = step["result"]
+                    if result["truncated"]:
+                        st.warning(
+                            f"Showing the first {len(result['rows'])} of "
+                            f"{result['total_rows']} rows (the model saw the same)."
+                        )
+                    st.dataframe(result["rows"], use_container_width=True)
 
 # --- Tab 2: Order Report generation ---
 with tab_report:
@@ -125,8 +142,8 @@ with tab_report:
 
     if generate_clicked:
         try:
-            report = get_order_report_data(conn, order_id)
-            if report.get("order_id") is None:
+            report = get_order_report_data(conn, order_id.strip())
+            if report is None:
                 st.error(f"No order found with ID '{order_id}'.")
             else:
                 buffer = io.BytesIO()

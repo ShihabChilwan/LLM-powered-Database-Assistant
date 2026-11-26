@@ -2,7 +2,13 @@ import sqlite3
 from pathlib import Path
 
 
-def get_order_report_data(conn, order_id):
+def get_order_report_data(conn: sqlite3.Connection, order_id: str) -> dict | None:
+    """Collects one order's header, customer, line items and computed total.
+
+    Input: an open connection (with row_factory = sqlite3.Row) and an order id.
+    Output: a dict with the order's columns plus "line_items" and "order_total",
+            or None if no order has that id.
+    """
     header_row = conn.execute(
         """
         SELECT o.order_id, o.order_date, o.customer_id, o.shipped_date, o.employee_name, o.shipper_name,
@@ -15,6 +21,9 @@ def get_order_report_data(conn, order_id):
         (order_id,),
     ).fetchone()
 
+    # fetchone() returns None when no row matches; dict(None) would raise TypeError.
+    if header_row is None:
+        return None
     report = dict(header_row)
 
     line_items = conn.execute(
