@@ -56,9 +56,17 @@ MAX_SQL_ROWS = 200
 # Number of document chunks the retriever returns (used from Part B3).
 TOP_K = 4
 
-# Chunks with a cosine similarity below this are dropped (used from Part B3).
-# Starting value only; it will be tuned once real embeddings can be inspected.
-MIN_SCORE = 0.3
+# Chunks with a cosine similarity below this are dropped by the retriever.
+# Tuned with scripts/tune_min_score.py (31 labelled queries, text-embedding-3-small):
+#   relevant questions: top score 0.49 to 0.72
+#   related topics the documents do not answer: 0.22 to 0.46
+#   unrelated questions: 0.09 to 0.21
+# 0.45 keeps every relevant question, with a margin below the lowest (0.49), and
+# drops all but one of the related-but-unanswered ones. We prefer letting a weak
+# chunk through (the agent will be told to answer only from what the text says) over
+# dropping a relevant one (the agent would then wrongly say "not covered").
+# Re-tune if EMBEDDING_MODEL or the documents change: scores depend on both.
+MIN_SCORE = 0.45
 
 # ---------- Document index (RAG) ----------
 
