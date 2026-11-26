@@ -23,7 +23,8 @@ from openai.types.chat import (
 from app import config
 from app.llm import client
 
-SCHEMA = """
+# An f-string: {config.MAX_SQL_ROWS} below is replaced by its value.
+SCHEMA = f"""
 customers(customer_id TEXT PRIMARY KEY, company_name TEXT, contact_name TEXT, address TEXT, city TEXT, postal_code TEXT, country TEXT, phone TEXT, fax TEXT, ship_region TEXT)
 orders(order_id TEXT PRIMARY KEY, order_date TEXT, customer_id TEXT REFERENCES customers, shipped_date TEXT, employee_name TEXT, shipper_name TEXT, ship_address TEXT, ship_city TEXT, ship_country TEXT, total_price REAL)
 order_items(order_id TEXT REFERENCES orders, product_id TEXT, product_name TEXT, quantity INTEGER, unit_price REAL, line_total REAL)
@@ -35,6 +36,16 @@ Important notes about the stock table:
 - units_sold is a per-month flow value - summing it across months IS meaningful (e.g. total units sold over a period).
 - For questions about "current" or "latest" stock, filter to the most recent month for that product, for example:
   WHERE month = (SELECT MAX(month) FROM stock WHERE product = 'X')
+
+Important notes about the orders table:
+- Some orders have NO shipper_name and NO shipped_date (NULL): they appear only in purchase
+  orders, with no shipping order. NULL means "not recorded", not "not shipped" - say so
+  instead of guessing, and remember that WHERE shipper_name = '...' skips these orders.
+
+Query results:
+- At most {config.MAX_SQL_ROWS} rows are returned. If the result says "truncated": true, only the first
+  rows are included and "total_rows" gives the real count: narrow the query (WHERE, GROUP BY,
+  COUNT, LIMIT) instead of drawing conclusions from a partial list.
 """
 
 # Tool definition in the OpenAI "tools" format: a name, a description the
@@ -114,11 +125,12 @@ def assistant_message_to_dict(message: ChatCompletionMessage) -> dict:
 
 def execute_tool_call(
     tool_call: ChatCompletionMessageFunctionToolCall,
-) -> tuple[str, list, str | None]:
+) -> tuple[str, dict | None, str | None]:
     """Runs one tool call requested by the model.
 
     Input: one entry of message.tool_calls.
-    Output: (sql, rows, error). error is None on success; on failure rows is []
+    Output: (sql, result, error). On success result is the dict from
+            run_sql_readonly() and error is None; on failure result is None
             and error holds the message that will be shown to the model.
     """
     sql = ""
@@ -132,16 +144,19 @@ def execute_tool_call(
     # Deliberately broad: any failure (bad JSON, bad SQL, blocked write) is sent back
     # to the model as an error so it can correct its query on the next turn.
     except Exception as error:  # noqa: BLE001
-        return sql, [], str(error)
+        return sql, None, str(error)
 
 
-def tool_result_message(tool_call_id: str, rows: list, error: str | None) -> dict:
+def tool_result_message(
+    tool_call_id: str, result: dict | None, error: str | None
+) -> dict:
     """Builds the "tool" message that returns a result to the model.
 
-    Input: the id of the tool call being answered, its rows, and its error (or None).
-    Output: a message dict whose content is JSON text.
+    Input: the id of the tool call being answered, its result, and its error (or None).
+    Output: a message dict whose content is JSON text, either
+            {"rows": [...], "truncated": ..., "total_rows": ...} or {"error": "..."}.
     """
-    payload = {"result": rows} if error is None else {"error": error}
+    payload = result if error is None else {"error": error}
     # default=str turns values json cannot encode (for example bytes) into text.
     return {
         "role": "tool",
@@ -160,6 +175,7 @@ def answer_question_manual_loop(
     Output: (answer, steps, model_calls)
       - steps: one dict per SQL tool call:
           {"turn", "sql", "result", "error", "tokens", "cost", "latency_s"}
+        result is {"rows", "truncated", "total_rows"}, or None if error is set.
         tokens/cost/latency_s belong to the model call that asked for this query,
         so steps from the same turn share them (do not add them up).
       - model_calls: one stats dict per model call, including the final answer
@@ -183,57 +199,94 @@ def answer_question_manual_loop(
 
         messages.append(assistant_message_to_dict(reply.message))
         for tool_call in reply.message.tool_calls:
-            sql, rows, error = execute_tool_call(tool_call)
+            sql, result, error = execute_tool_call(tool_call)
             if verbose:
                 # {sql!r} prints the value with quotes, like repr(), so empty SQL is visible.
                 print(f"Turn {turn}: model called {tool_call.function.name}({sql!r})")
-                print(f"  -> result: {rows if error is None else error}")
+                print(f"  -> result: {result if error is None else error}")
             step = {
                 "turn": turn,
                 "sql": sql,
-                "result": rows,
+                "result": result,
                 "error": error,
                 "tokens": call_stats["tokens"],
                 "cost": call_stats["cost"],
                 "latency_s": call_stats["latency_s"],
             }
             steps.append(step)
-            messages.append(tool_result_message(tool_call.id, rows, error))
+            messages.append(tool_result_message(tool_call.id, result, error))
 
     return MAX_TURNS_MESSAGE, steps, model_calls
 
 
-def run_sql_readonly(sql: str) -> list[dict]:
-    """Runs a SELECT query on a read-only connection and returns the rows as dicts.
+# Statements that change data or the schema. Checked only as the first word.
+WRITE_KEYWORDS = (
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "ATTACH",
+    "PRAGMA",
+    "REPLACE",
+    "TRUNCATE",
+)
 
-    Input: one SQL statement.
-    Output: a list of {column: value} dicts.
-    Raises ValueError for statements that start with a write keyword.
-    (Unchanged in Part A0; Part A tightens this guard and caps the rows.)
+
+def reject_obvious_writes(sql: str) -> None:
+    """Fast first filter: raises ValueError if the statement starts with a write keyword.
+
+    This is NOT the real protection. It only looks at the first word, so for example
+    "WITH x AS (SELECT 1) DELETE FROM stock" gets past it. The actual guarantee is the
+    read-only connection (mode=ro) in run_sql_readonly(): SQLite itself refuses every
+    write on it. This check just gives the model a clearer error message, sooner.
     """
     normalized = sql.strip().upper()
-    dangerous = (
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "ALTER",
-        "CREATE",
-        "ATTACH",
-        "PRAGMA",
-        "REPLACE",
-        "TRUNCATE",
-    )
-    if any(normalized.startswith(keyword) for keyword in dangerous):
-        raise ValueError("Write operations are not allowed")
+    for keyword in WRITE_KEYWORDS:
+        if normalized.startswith(keyword):
+            raise ValueError("Write operations are not allowed")
 
+
+def fetch_capped(cursor: sqlite3.Cursor, max_rows: int) -> dict:
+    """Reads at most max_rows rows from a cursor, and counts the rest without keeping them.
+
+    Input: a cursor that has executed a query (rows are sqlite3.Row), and the cap.
+    Output: {"rows": [...], "truncated": bool, "total_rows": int}.
+    """
+    rows = []
+    for row in cursor.fetchmany(max_rows):
+        rows.append(dict(row))
+    # Count the remaining rows one by one, so a huge result never sits in memory.
+    remaining = 0
+    for _row in cursor:
+        remaining += 1
+    return {
+        "rows": rows,
+        "truncated": remaining > 0,
+        "total_rows": len(rows) + remaining,
+    }
+
+
+def run_sql_readonly(sql: str, max_rows: int = config.MAX_SQL_ROWS) -> dict:
+    """Runs one SQL statement on a read-only connection, returning at most max_rows rows.
+
+    Input: one SQL statement, and the row cap.
+    Output: {"rows": [{column: value}, ...], "truncated": bool, "total_rows": int}.
+            "truncated" is True when rows were cut off, so the model knows to narrow
+            its query; "total_rows" is the full count either way.
+    Raises ValueError for an obvious write, sqlite3.Error for invalid SQL or any write.
+    """
+    reject_obvious_writes(sql)
+
+    # mode=ro is the real write guard: SQLite opens the file read-only and refuses
+    # every INSERT, UPDATE, DELETE, DROP ..., however the statement is phrased.
     connection = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        rows = [dict(row) for row in connection.execute(sql).fetchall()]
+        return fetch_capped(connection.execute(sql), max_rows)
     finally:
         connection.close()
-    return rows
 
 
 # Run from the project root with:  python -m app.llm.text_to_sql

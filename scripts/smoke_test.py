@@ -79,7 +79,7 @@ def run_one(item: dict) -> bool:
         outcome = (
             f"ERROR: {step['error']}"
             if step["error"]
-            else f"{len(step['result'])} row(s)"
+            else f"{step['result']['total_rows']} row(s)"
         )
         print(f"  tool call (turn {step['turn']}): {step['sql']}  -> {outcome}")
     print_model_calls(model_calls)
