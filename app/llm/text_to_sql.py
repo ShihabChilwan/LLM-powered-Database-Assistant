@@ -27,11 +27,13 @@ Important notes about the stock table:
 
 # ---------- Approach: Bounded exploratory tool-use ----------
 
+
 def run_probe_query(sql: str) -> list:
     """Runs a read-only SELECT query against the database and returns the resulting rows.
     Use this to explore the actual data (e.g. check what months exist for a specific product)
     before committing to a final answer."""
     return run_sql_readonly(sql)
+
 
 def answer_question_manual_loop(question, max_turns=10, verbose=True):
     """Runs the bounded text-to-SQL loop.
@@ -44,7 +46,11 @@ def answer_question_manual_loop(question, max_turns=10, verbose=True):
     """
     steps = []
     contents = [
-        types.Content(role="user", parts=[types.Part.from_text(text=f"""
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(
+                    text=f"""
 You are answering questions against this SQLite schema:
 
 {SCHEMA}
@@ -56,7 +62,10 @@ doing any date arithmetic - don't guess.
 Question: "{question}"
 
 Give a final natural-language answer using only data you've actually queried.
-""")])
+"""
+                )
+            ],
+        )
     ]
 
     for turn in range(max_turns):
@@ -65,14 +74,19 @@ Give a final natural-language answer using only data you've actually queried.
             contents=contents,
             config=types.GenerateContentConfig(
                 tools=[run_probe_query],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True
+                ),
             ),
         )
 
         function_calls = response.function_calls
 
         if not function_calls:
-            return response.text, steps   # model gave a final answer, no more tool calls requested
+            return (
+                response.text,
+                steps,
+            )  # model gave a final answer, no more tool calls requested
 
         contents.append(response.candidates[0].content)
 
@@ -92,12 +106,16 @@ Give a final natural-language answer using only data you've actually queried.
             if verbose:
                 print(f"  -> result: {result if error is None else error}")
 
-            steps.append({"turn": turn + 1, "sql": sql, "result": result, "error": error})
+            steps.append(
+                {"turn": turn + 1, "sql": sql, "result": result, "error": error}
+            )
 
-            response_parts.append(types.Part.from_function_response(
-                name=call.name,
-                response={"result": result} if error is None else {"error": error},
-            ))
+            response_parts.append(
+                types.Part.from_function_response(
+                    name=call.name,
+                    response={"result": result} if error is None else {"error": error},
+                )
+            )
 
         contents.append(types.Content(role="tool", parts=response_parts))
 
@@ -106,10 +124,21 @@ Give a final natural-language answer using only data you've actually queried.
 
 def run_sql_readonly(sql):
     normalized = sql.strip().upper()
-    dangerous = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "ATTACH", "PRAGMA", "REPLACE", "TRUNCATE")
+    dangerous = (
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "DROP",
+        "ALTER",
+        "CREATE",
+        "ATTACH",
+        "PRAGMA",
+        "REPLACE",
+        "TRUNCATE",
+    )
     if any(normalized.startswith(kw) for kw in dangerous):
         raise ValueError("Write operations are not allowed")
-    
+
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -117,6 +146,7 @@ def run_sql_readonly(sql):
     finally:
         conn.close()
     return rows
+
 
 if __name__ == "__main__":
     # question = "How many units of 'Alice Mutton' were sold 3 months back and what is the stock of 'Chang' a month back?"
@@ -126,4 +156,3 @@ if __name__ == "__main__":
     print("\n=== Agentic (manual loop, visible steps) ===")
     answer, steps = answer_question_manual_loop(question)
     print(answer)
-

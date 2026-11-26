@@ -1,5 +1,6 @@
 import pdfplumber
 
+
 def parse_invoice(path):
     with pdfplumber.open(path) as pdf:
         page0 = pdf.pages[0]
@@ -23,7 +24,9 @@ def parse_invoice(path):
 
         # --- Region 3: Product Details table -> line items + total ---
         product_table_page0 = page0_tables[1]
-        col_names = [c.strip().lower().replace(" ", "_") for c in product_table_page0[0]]
+        col_names = [
+            c.strip().lower().replace(" ", "_") for c in product_table_page0[0]
+        ]
 
         product_rows = product_table_page0[1:]
         for page in pdf.pages[1:]:
@@ -43,9 +46,15 @@ def parse_invoice(path):
         header["total_price"] = total_price
         return header
 
+
 if __name__ == "__main__":
     result = parse_invoice("CompanyDocuments/invoices/invoice_11077.pdf")
     import json
+
     print(json.dumps(result, indent=2))
-    computed_total = sum(item["quantity"] * item["unit_price"] for item in result["line_items"])
-    assert abs(computed_total - result["total_price"]) < 0.01, f"Mismatch: {computed_total} vs {result['total_price']}"
+    computed_total = sum(
+        item["quantity"] * item["unit_price"] for item in result["line_items"]
+    )
+    assert abs(computed_total - result["total_price"]) < 0.01, (
+        f"Mismatch: {computed_total} vs {result['total_price']}"
+    )

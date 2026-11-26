@@ -3,6 +3,7 @@ import pdfplumber
 
 LINE_PATTERN = re.compile(r"^(.+?)\s+(\d+)\s+(\d+)\s+([\d.]+)$")
 
+
 def parse_stock_report_category(path):
     with pdfplumber.open(path) as pdf:
         text = pdf.pages[0].extract_text()
@@ -20,14 +21,16 @@ def parse_stock_report_category(path):
         match = LINE_PATTERN.match(line)
         if match:
             product, units_sold, units_in_stock, unit_price = match.groups()
-            rows.append({
-                "category": category,
-                "product": product,
-                "units_sold": int(units_sold),
-                "units_in_stock": int(units_in_stock),
-                "unit_price": float(unit_price),
-                "month": month,
-            })
+            rows.append(
+                {
+                    "category": category,
+                    "product": product,
+                    "units_sold": int(units_sold),
+                    "units_in_stock": int(units_in_stock),
+                    "unit_price": float(unit_price),
+                    "month": month,
+                }
+            )
             continue
 
         if ":" in line:
@@ -37,7 +40,11 @@ def parse_stock_report_category(path):
 
     return rows
 
-if __name__=="__main__":
-    result = parse_stock_report_category("CompanyDocuments/Inventory Report/monthly-Category/monthly-Category/StockReport_2016-08_1.pdf")
+
+if __name__ == "__main__":
+    result = parse_stock_report_category(
+        "CompanyDocuments/Inventory Report/monthly-Category/monthly-Category/StockReport_2016-08_1.pdf"
+    )
     import json
-    print(json.dumps(result,indent=2))
+
+    print(json.dumps(result, indent=2))

@@ -30,6 +30,7 @@ st.set_page_config(page_title=" Database QA and Report Assistant", layout="wide"
 
 # ---------- Shared resources ----------
 
+
 @st.cache_resource
 def get_connection():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -50,7 +51,9 @@ def db_stats(conn):
 # ---------- UI ----------
 
 st.title("📄Database QA and Report Assistant")
-st.caption("Ask questions over the ingested order/invoice/stock data, or generate a consolidated Order Report.")
+st.caption(
+    "Ask questions over the ingested order/invoice/stock data, or generate a consolidated Order Report."
+)
 
 conn = get_connection()
 
@@ -67,9 +70,11 @@ tab_ask, tab_report = st.tabs(["💬 Ask a question", "📄 Generate Order Repor
 
 # --- Tab 1: text-to-SQL ---
 with tab_ask:
-    st.write("Examples: *\"How many units of Alice Mutton were sold in July 2016?\"*, "
-             "*\"Give me the entire order history of 10248\"*, "
-             "*\"Which orders were shipped more than a week after ordering?\"*")
+    st.write(
+        'Examples: *"How many units of Alice Mutton were sold in July 2016?"*, '
+        '*"Give me the entire order history of 10248"*, '
+        '*"Which orders were shipped more than a week after ordering?"*'
+    )
 
     question = st.text_input("Your question", key="question_input")
     ask_clicked = st.button("Ask", type="primary", disabled=not question)
@@ -95,11 +100,15 @@ with tab_ask:
 
 # --- Tab 2: Order Report generation ---
 with tab_report:
-    st.write("Pulls the header, line items, and computed total for one order across "
-             "invoice, purchase order, and shipping order data, and builds a downloadable Excel report.")
+    st.write(
+        "Pulls the header, line items, and computed total for one order across "
+        "invoice, purchase order, and shipping order data, and builds a downloadable Excel report."
+    )
 
     order_id = st.text_input("Order ID", value="10248", key="order_id_input")
-    generate_clicked = st.button("Generate report", type="primary", disabled=not order_id)
+    generate_clicked = st.button(
+        "Generate report", type="primary", disabled=not order_id
+    )
 
     if generate_clicked:
         try:
@@ -129,7 +138,3 @@ with tab_report:
                 )
         except Exception as e:
             st.error(f"Failed to generate report: {e}")
-
-
-
-
