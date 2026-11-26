@@ -13,13 +13,22 @@ Uses app/database/processed.db, built by app/database/db.py.
 
 import io
 import sqlite3
+import sys
 import time
 from pathlib import Path
 
 
 import streamlit as st
 
-from llm.text_to_sql import answer_question_manual_loop
+# `streamlit run app/streamlit_app.py` only puts app/ on the import path, which is
+# what lets `reporting...` below resolve. The newer modules import each other as
+# `app.<module>` (so they also work with `python -m app...` and from scripts/), which
+# needs the project root on the path too. sys.path is Python's classpath.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.llm.text_to_sql import answer_question_manual_loop
 from reporting.dbjson import get_order_report_data
 from reporting.order_report import generate_order_report
 
@@ -82,11 +91,15 @@ with tab_ask:
     if ask_clicked:
         with st.spinner("Thinking..."):
             start = time.time()
-            answer, steps = answer_question_manual_loop(question, verbose=False)
+            answer, steps, model_calls = answer_question_manual_loop(question, verbose=False)
             elapsed = time.time() - start
 
+        total_tokens = sum(call["tokens"]["total"] for call in model_calls)
         st.success(answer)
-        st.caption(f"Answered in {elapsed:.1f}s using {len(steps)} SQL call(s).")
+        st.caption(
+            f"Answered in {elapsed:.1f}s using {len(steps)} SQL call(s), "
+            f"{len(model_calls)} model call(s), {total_tokens} tokens."
+        )
 
         if steps:
             with st.expander("Show reasoning trace (generated SQL + results)"):
