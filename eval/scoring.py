@@ -65,6 +65,8 @@ REFUSAL_MARKERS = [
     "not include",
     "don't include",
     "doesn't include",
+    "not specify",
+    "no such",
 ]
 
 # Every kind of dash or minus the model may write, turned into a plain "-".
