@@ -59,3 +59,23 @@ TOP_K = 4
 # Chunks with a cosine similarity below this are dropped (used from Part B3).
 # Starting value only; it will be tuned once real embeddings can be inspected.
 MIN_SCORE = 0.3
+
+# ---------- Document index (RAG) ----------
+
+# The Markdown policy documents that are indexed.
+POLICIES_DIR = PROJECT_ROOT / "CompanyDocuments" / "Policies"
+
+# Where ChromaDB keeps its files on disk (ignored by git; rebuilt by app.rag.ingest).
+CHROMA_DIR = PROJECT_ROOT / "app" / "rag" / "chroma_db"
+COLLECTION_NAME = "company_policies"
+
+# Target maximum chunk length in characters. A section longer than this is split.
+# A Markdown table is never split, so a chunk holding a table may be longer.
+CHUNK_SIZE = 800
+
+# Characters repeated from the end of one chunk at the start of the next piece of
+# the same section, so a sentence cut at a boundary still has its context.
+CHUNK_OVERLAP = 100
+
+# How many texts are sent in one embeddings request.
+EMBED_BATCH_SIZE = 64
