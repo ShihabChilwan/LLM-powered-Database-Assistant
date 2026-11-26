@@ -24,6 +24,7 @@ from openai.types.chat import ChatCompletionMessage
 
 from app import config
 from app.llm import client, prompts, tools
+from app.rag.citations import CitationCheck, check_citations
 
 MAX_TURNS_MESSAGE = "Reached the maximum number of turns without a final answer."
 
@@ -44,6 +45,8 @@ class AgentResult:
       - tool_call_id (extra): links the step to the model's tool call.
     model_calls: one stats dict per model call, including the final answer and
         any failed call.
+    citation_check: the answer's citations, split into verified (retrieved in
+        this run) and unverified (see app/rag/citations.py).
     """
 
     answer: str
@@ -52,6 +55,7 @@ class AgentResult:
     total_tokens: int = 0
     total_latency_s: float = 0.0
     model_calls: list[dict] = field(default_factory=list)
+    citation_check: CitationCheck = field(default_factory=CitationCheck)
 
     def tools_label(self) -> str:
         """Returns the tools used as a short label, e.g. "SQL + Documents", or "None"."""
@@ -143,6 +147,7 @@ def finish(
         total_tokens=total_tokens,
         total_latency_s=round(time.perf_counter() - start, 3),
         model_calls=model_calls,
+        citation_check=check_citations(answer, steps),
     )
 
 
@@ -187,6 +192,10 @@ def print_result(result: AgentResult) -> None:
         print(f"  turn {step['turn']}: {step['tool']}({step['input']!r}) -> {outcome}")
     print(f"Tools used: {result.tools_label()}")
     print(f"Answer:\n{result.answer}")
+    for citation in result.citation_check.verified:
+        print(f"  verified citation:   {citation.text()}")
+    for citation in result.citation_check.unverified:
+        print(f"  UNVERIFIED citation: {citation.text()}")
     print(
         f"Totals: {result.total_tokens} tokens, {len(result.model_calls)} model calls, "
         f"{result.total_latency_s}s"
