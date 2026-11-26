@@ -22,8 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app import config  # must come after the sys.path change
-from app.llm.agent import MAX_TURNS_MESSAGE
-from app.llm.text_to_sql import answer_question_manual_loop
+from app.llm.agent import MAX_TURNS_MESSAGE, answer_question
 
 # Each question comes with a reference query, so you can check the model's answer by eye.
 QUESTIONS = [
@@ -68,32 +67,36 @@ def run_one(item: dict) -> bool:
     """Asks one question and prints the trace.
 
     Input: one entry of QUESTIONS.
-    Output: True if the model called the tool at least once and gave a final answer.
+    Output: True if the model called the SQL tool at least once and gave a final answer.
     """
     print("=" * 70)
     print(f"Q: {item['question']}")
-    answer, steps, model_calls = answer_question_manual_loop(
-        item["question"], verbose=False
-    )
+    result = answer_question(item["question"])
 
-    for step in steps:
-        outcome = (
-            f"ERROR: {step['error']}"
-            if step["error"]
-            else f"{step['result']['total_rows']} row(s)"
+    sql_steps = []
+    for step in result.steps:
+        if step["error"]:
+            outcome = f"ERROR: {step['error']}"
+        elif step["tool"] == "run_sql_query":
+            outcome = f"{step['result']['total_rows']} row(s)"
+        else:
+            outcome = f"{len(step['result']['passages'])} passage(s)"
+        print(
+            f"  tool call (turn {step['turn']}): {step['tool']}: {step['input']}  -> {outcome}"
         )
-        print(f"  tool call (turn {step['turn']}): {step['sql']}  -> {outcome}")
-    print_model_calls(model_calls)
-    print(f"A: {answer}")
+        if step["tool"] == "run_sql_query":
+            sql_steps.append(step)
+    print_model_calls(result.model_calls)
+    print(f"A: {result.answer}")
     print(f"Reference: {reference_value(item['reference_sql'])}")
 
-    model_failed = any(call["error"] for call in model_calls)
-    used_tool = len(steps) > 0
-    finished = answer != MAX_TURNS_MESSAGE and not model_failed
+    model_failed = any(call["error"] for call in result.model_calls)
+    used_tool = len(sql_steps) > 0
+    finished = result.answer != MAX_TURNS_MESSAGE and not model_failed
     if model_failed:
         print("  !! A model call failed (see ERROR above), so tool use was not tested.")
     elif not used_tool:
-        print("  !! The model answered WITHOUT calling the tool.")
+        print("  !! The model answered WITHOUT calling the SQL tool.")
     return used_tool and finished
 
 
@@ -105,7 +108,9 @@ def main() -> int:
         if run_one(item):
             passed += 1
     print("=" * 70)
-    print(f"{passed}/{len(QUESTIONS)} questions used the tool and produced an answer.")
+    print(
+        f"{passed}/{len(QUESTIONS)} questions used the SQL tool and produced an answer."
+    )
     return 0 if passed == len(QUESTIONS) else 1
 
 
