@@ -22,7 +22,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app import config  # must come after the sys.path change
-from app.llm.text_to_sql import MAX_TURNS_MESSAGE, answer_question_manual_loop
+from app.llm.agent import MAX_TURNS_MESSAGE
+from app.llm.text_to_sql import answer_question_manual_loop
 
 # Each question comes with a reference query, so you can check the model's answer by eye.
 QUESTIONS = [
